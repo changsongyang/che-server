@@ -71,8 +71,12 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
   public static final String ANNOTATION_SCM_ORGANIZATION = "che.eclipse.org/scm-organization";
   public static final String ANNOTATION_SCM_PERSONAL_ACCESS_TOKEN_ID =
       "che.eclipse.org/scm-personal-access-token-id";
+
+  @Deprecated
+  // This annotation is deprecated and will be removed in the future.
   public static final String ANNOTATION_SCM_PERSONAL_ACCESS_TOKEN_NAME =
       "che.eclipse.org/scm-personal-access-token-name";
+
   public static final String ANNOTATION_SCM_URL = "che.eclipse.org/scm-url";
   public static final String TOKEN_DATA_FIELD = "token";
 
@@ -112,9 +116,6 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
                       .put(
                           ANNOTATION_SCM_PERSONAL_ACCESS_TOKEN_ID,
                           personalAccessToken.getScmTokenId())
-                      .put(
-                          ANNOTATION_SCM_PERSONAL_ACCESS_TOKEN_NAME,
-                          personalAccessToken.getScmTokenName())
                       .build())
               .withLabels(SECRET_LABELS)
               .build();
@@ -226,7 +227,9 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
               PersonalAccessToken personalAccessToken =
                   new PersonalAccessToken(
                       personalAccessTokenParams.getScmProviderUrl(),
-                      getScmProviderName(personalAccessTokenParams),
+                      getScmProviderName(
+                          personalAccessTokenParams.getScmProviderName(),
+                          personalAccessTokenParams.getScmTokenName()),
                       secretAnnotations.get(ANNOTATION_CHE_USERID),
                       personalAccessTokenParams.getOrganization(),
                       scmUsername.get(),
@@ -262,13 +265,12 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
    * This is used to support back compatibility with the old token secrets, which do not have the
    * 'che.eclipse.org/scm-provider-name' annotation.
    *
-   * @param params the parameters of the personal access token
+   * @param providerName the name of the SCM provider
+   * @param tokenName the name of the token
    * @return the name of the SCM provider
    */
-  private String getScmProviderName(PersonalAccessTokenParams params) {
-    return isNullOrEmpty(params.getScmProviderName())
-        ? params.getScmTokenName()
-        : params.getScmProviderName();
+  private String getScmProviderName(@Nullable String providerName, String tokenName) {
+    return isNullOrEmpty(providerName) ? tokenName : providerName;
   }
 
   private boolean deleteSecretIfMisconfigured(Secret secret) throws InfrastructureException {
@@ -278,8 +280,8 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
     LOG.debug("SCM server URL: {}", configuredScmServerUrl);
     String configuredCheUserId = secretAnnotations.get(ANNOTATION_CHE_USERID);
     LOG.debug("Che user ID: {}", configuredCheUserId);
-    String configuredOAuthProviderName =
-        secretAnnotations.get(ANNOTATION_SCM_PERSONAL_ACCESS_TOKEN_NAME);
+    String providerName = secretAnnotations.get(ANNOTATION_SCM_PROVIDER_NAME);
+    String configuredOAuthProviderName = getScmProviderName(providerName, getTokenName(secret));
     LOG.debug("OAuth provider name: {}", configuredOAuthProviderName);
 
     // if any of the required annotations is missing, the secret is not valid
@@ -298,12 +300,28 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
     return false;
   }
 
+  /**
+   * Returns the token name. If the token name is not set, the name of the secret in format:
+   * personal-access-token-<token-name> is used. This is used to support back compatibility with the
+   * old token secrets, which do not have the 'che.eclipse.org/scm-provider-name' annotation, but
+   * have the deprecated 'che.eclipse.org/scm-personal-access-token-name' annotation.
+   *
+   * @param secret the secret
+   * @return the token name
+   */
+  private String getTokenName(Secret secret) {
+    String tokenName =
+        secret.getMetadata().getAnnotations().get(ANNOTATION_SCM_PERSONAL_ACCESS_TOKEN_NAME);
+    String secretName = secret.getMetadata().getName();
+    return isNullOrEmpty(tokenName)
+        ? secretName.substring(secretName.lastIndexOf("-") + 1)
+        : tokenName;
+  }
+
   private PersonalAccessTokenParams secret2PersonalAccessTokenParams(Secret secret) {
     Map<String, String> secretAnnotations = secret.getMetadata().getAnnotations();
 
     String token = new String(Base64.getDecoder().decode(secret.getData().get("token"))).trim();
-    String configuredOAuthTokenName =
-        secretAnnotations.get(ANNOTATION_SCM_PERSONAL_ACCESS_TOKEN_NAME);
     String configuredTokenId = secretAnnotations.get(ANNOTATION_SCM_PERSONAL_ACCESS_TOKEN_ID);
     String configuredScmOrganization = secretAnnotations.get(ANNOTATION_SCM_ORGANIZATION);
     String configuredScmServerUrl = secretAnnotations.get(ANNOTATION_SCM_URL);
@@ -312,7 +330,7 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
     return new PersonalAccessTokenParams(
         trimEnd(configuredScmServerUrl, '/'),
         configuredScmProviderName,
-        configuredOAuthTokenName,
+        getTokenName(secret),
         configuredTokenId,
         token,
         configuredScmOrganization);
@@ -326,8 +344,8 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
     Map<String, String> secretAnnotations = secret.getMetadata().getAnnotations();
     String configuredScmServerUrl = secretAnnotations.get(ANNOTATION_SCM_URL);
     String configuredCheUserId = secretAnnotations.get(ANNOTATION_CHE_USERID);
-    String configuredOAuthProviderName =
-        secretAnnotations.get(ANNOTATION_SCM_PERSONAL_ACCESS_TOKEN_NAME);
+    String providerName = secretAnnotations.get(ANNOTATION_SCM_PROVIDER_NAME);
+    String configuredOAuthProviderName = getScmProviderName(providerName, getTokenName(secret));
 
     return (configuredCheUserId.equals(cheUser.getUserId()))
         && (oAuthProviderName == null || oAuthProviderName.equals(configuredOAuthProviderName))
@@ -381,8 +399,7 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
 
   @Override
   public void storeGitCredentials(String scmServerUrl)
-      throws UnsatisfiedScmPreconditionException, ScmConfigurationPersistenceException,
-          ScmCommunicationException, ScmUnauthorizedException {
+      throws UnsatisfiedScmPreconditionException, ScmConfigurationPersistenceException {
     Subject subject = EnvironmentContext.getCurrent().getSubject();
     Optional<PersonalAccessToken> tokenOptional = get(subject, scmServerUrl);
     if (tokenOptional.isPresent()) {
