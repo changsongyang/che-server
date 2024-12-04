@@ -411,7 +411,9 @@ public class HttpBitbucketServerApiClient implements BitbucketServerApiClient {
             throw new ScmItemNotFoundException(body);
           default:
             throw new ScmCommunicationException(
-                "Unexpected status code " + response.statusCode() + " " + response.toString());
+                "Unexpected status code " + response.statusCode() + " " + response,
+                response.statusCode(),
+                "bitbucket");
         }
       }
     } catch (IOException | InterruptedException | UncheckedIOException e) {
@@ -421,7 +423,7 @@ public class HttpBitbucketServerApiClient implements BitbucketServerApiClient {
 
   private @Nullable String getToken() throws ScmUnauthorizedException {
     try {
-      OAuthToken token = oAuthAPI.getToken("bitbucket");
+      OAuthToken token = oAuthAPI.getOrRefreshToken("bitbucket-server");
       return token.getToken();
     } catch (NotFoundException
         | ServerException
@@ -459,7 +461,7 @@ public class HttpBitbucketServerApiClient implements BitbucketServerApiClient {
         "bitbucket",
         authenticator instanceof NoopOAuthAuthenticator ? "2.0" : "1.0",
         authenticator instanceof NoopOAuthAuthenticator
-            ? apiEndpoint + "/oauth/authenticate?oauth_provider=bitbucket&scope=ADMIN_WRITE"
+            ? apiEndpoint + "/oauth/authenticate?oauth_provider=bitbucket-server&scope=ADMIN_WRITE"
             : authenticator.getLocalAuthenticateUrl());
   }
 }

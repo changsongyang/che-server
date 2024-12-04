@@ -49,7 +49,7 @@ public class GitLabAuthenticatorTest {
     // given
     GitLabOAuthAuthenticator gitLabOAuthAuthenticator =
         new GitLabOAuthAuthenticator(
-            "id", "secret", wireMockServer.url("/"), "https://che.api.com");
+            "id", "secret", wireMockServer.url("/"), "https://che.api.com", "gitlab");
     Field flowField = OAuthAuthenticator.class.getDeclaredField("flow");
     Field credentialDataStoreField =
         ((Class) flowField.getGenericType()).getDeclaredField("credentialDataStore");
@@ -64,7 +64,7 @@ public class GitLabAuthenticatorTest {
             .withHeader(HttpHeaders.AUTHORIZATION, equalTo("Bearer token"))
             .willReturn(aResponse().withBody("{\"id\": \"testId\"}")));
     // when
-    OAuthToken token = gitLabOAuthAuthenticator.getToken("userId");
+    OAuthToken token = gitLabOAuthAuthenticator.getOrRefreshToken("userId");
     // then
     assertEquals(token.getToken(), "token");
   }
@@ -74,7 +74,7 @@ public class GitLabAuthenticatorTest {
     // given
     GitLabOAuthAuthenticator gitLabOAuthAuthenticator =
         new GitLabOAuthAuthenticator(
-            "id", "secret", wireMockServer.url("/"), "https://che.api.com");
+            "id", "secret", wireMockServer.url("/"), "https://che.api.com", "gitlab");
     Field flowField = OAuthAuthenticator.class.getDeclaredField("flow");
     Field credentialDataStoreField =
         ((Class) flowField.getGenericType()).getDeclaredField("credentialDataStore");
@@ -89,7 +89,7 @@ public class GitLabAuthenticatorTest {
             .withHeader(HttpHeaders.AUTHORIZATION, equalTo("Bearer token"))
             .willReturn(aResponse().withBody("{}")));
     // when
-    OAuthToken token = gitLabOAuthAuthenticator.getToken("userId");
+    OAuthToken token = gitLabOAuthAuthenticator.getOrRefreshToken("userId");
     // then
     assertNull(token);
   }

@@ -14,7 +14,6 @@ package org.eclipse.che.api.factory.server.github;
 import static com.google.common.base.MoreObjects.firstNonNull;
 import static com.google.common.base.Strings.isNullOrEmpty;
 import static java.lang.String.format;
-import static java.net.HttpURLConnection.HTTP_UNAUTHORIZED;
 import static java.util.regex.Pattern.compile;
 import static org.eclipse.che.api.factory.server.ApiExceptionMapper.toApiException;
 import static org.eclipse.che.api.factory.server.github.GithubApiClient.GITHUB_SAAS_ENDPOINT;
@@ -63,6 +62,8 @@ public abstract class AbstractGithubURLParser {
   private final boolean disableSubdomainIsolation;
 
   private final String providerName;
+  private final String endpoint;
+  private final boolean isGitHubServer;
 
   /** Constructor used for testing only. */
   AbstractGithubURLParser(
@@ -77,26 +78,37 @@ public abstract class AbstractGithubURLParser {
     this.apiClient = githubApiClient;
     this.disableSubdomainIsolation = disableSubdomainIsolation;
     this.providerName = providerName;
+    // Check if the given OAuth endpoint is a GitHub server URL. If the OAuth endpoint is not
+    // defined, or it equals the GitHub SaaS endpoint, it means that the given URL is a GitHub SaaS
+    // URL (https://github.com). Otherwise, the given URL is a GitHub server URL.
+    this.isGitHubServer =
+        !isNullOrEmpty(oauthEndpoint) && !GITHUB_SAAS_ENDPOINT.equals(oauthEndpoint);
 
-    String endpoint =
-        isNullOrEmpty(oauthEndpoint) ? GITHUB_SAAS_ENDPOINT : trimEnd(oauthEndpoint, '/');
+    endpoint = isNullOrEmpty(oauthEndpoint) ? GITHUB_SAAS_ENDPOINT : trimEnd(oauthEndpoint, '/');
 
     this.githubPattern = compile(format(githubPatternTemplate, endpoint));
     this.githubSSHPattern =
         compile(format(githubSSHPatternTemplate, URI.create(endpoint).getHost()));
   }
 
+  // Check if the given URL is a valid GitHub URL.
   public boolean isValid(@NotNull String url) {
     String trimmedUrl = trimEnd(url, '/');
-    return githubPattern.matcher(trimmedUrl).matches()
+    return
+    // Check if the given URL matches the GitHub URL patterns. It works if OAuth is configured and
+    // GitHub server URL is known or the repository URL points to GitHub SaaS (https://github.com).
+    githubPattern.matcher(trimmedUrl).matches()
         || githubSSHPattern.matcher(trimmedUrl).matches()
-        // If the GitHub URL is not configured, try to find it in a manually added user namespace
-        // token.
+        // Check whether PAT is configured for the GitHub server URL. It is sufficient to confirm
+        // that the URL is a valid GitHub URL.
         || isUserTokenPresent(trimmedUrl)
-        // Try to call an API request to see if the URL matches GitHub.
-        || isApiRequestRelevant(trimmedUrl);
+        // Check if the given URL is a valid GitHub URL by reaching the endpoint of the GitHub
+        // server and analysing the response. This query basically only needs to be performed if the
+        // specified repository URL does not point to GitHub SaaS.
+        || (!isGitHubServer && isApiRequestRelevant(trimmedUrl));
   }
 
+  // Try to find the given url in a manually added user namespace token secret.
   private boolean isUserTokenPresent(String repositoryUrl) {
     Optional<String> serverUrlOptional = getServerUrl(repositoryUrl);
     if (serverUrlOptional.isPresent()) {
@@ -108,13 +120,14 @@ public abstract class AbstractGithubURLParser {
           PersonalAccessToken accessToken = token.get();
           return accessToken.getScmTokenName().equals(providerName);
         }
-      } catch (ScmConfigurationPersistenceException exception) {
+      } catch (ScmConfigurationPersistenceException | ScmCommunicationException exception) {
         return false;
       }
     }
     return false;
   }
 
+  // Try to call an API request to see if the given url matches self-hosted GitHub Enterprise.
   private boolean isApiRequestRelevant(String repositoryUrl) {
     Optional<String> serverUrlOptional = getServerUrl(repositoryUrl);
     if (serverUrlOptional.isPresent()) {
@@ -123,14 +136,16 @@ public abstract class AbstractGithubURLParser {
         // If the user request catches the unauthorised error, it means that the provided url
         // belongs to GitHub.
         githubApiClient.getUser("");
-      } catch (ScmCommunicationException e) {
-        return e.getStatusCode() == HTTP_UNAUTHORIZED
-                // Check the error message as well, because other providers might also return 401
-                // for such requests.
-                && e.getMessage().contains("Requires authentication")
+      } catch (ScmUnauthorizedException e) {
+        // Check the error message as well, because other providers might also return 401
+        // for such requests.
+        return e.getMessage().contains("Requires authentication")
             || // for older GitHub Enterprise versions
             e.getMessage().contains("Must authenticate to access this API.");
-      } catch (ScmItemNotFoundException | ScmBadRequestException | IllegalArgumentException e) {
+      } catch (ScmItemNotFoundException
+          | ScmBadRequestException
+          | IllegalArgumentException
+          | ScmCommunicationException e) {
         return false;
       }
     }
@@ -275,7 +290,8 @@ public abstract class AbstractGithubURLParser {
         return apiClient.getPullRequest(pullRequestId, repoUser, repoName, null);
       } catch (ScmItemNotFoundException
           | ScmCommunicationException
-          | ScmBadRequestException exception) {
+          | ScmBadRequestException
+          | ScmUnauthorizedException exception) {
         LOG.error("Failed to authenticate to GitHub", e);
       }
 
@@ -326,7 +342,8 @@ public abstract class AbstractGithubURLParser {
       } catch (ScmItemNotFoundException
           | ScmCommunicationException
           | ScmBadRequestException
-          | URISyntaxException exception) {
+          | URISyntaxException
+          | ScmUnauthorizedException exception) {
         LOG.error("Failed to authenticate to GitHub", e);
       }
     } catch (ScmCommunicationException

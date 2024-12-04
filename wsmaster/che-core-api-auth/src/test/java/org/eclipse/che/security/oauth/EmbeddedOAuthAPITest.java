@@ -17,6 +17,7 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static org.eclipse.che.api.factory.server.scm.PersonalAccessTokenFetcher.OAUTH_2_PREFIX;
 import static org.eclipse.che.dto.server.DtoFactory.newDto;
+import static org.eclipse.che.security.oauth.OAuthAuthenticator.SSL_ERROR_CODE;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -38,6 +39,7 @@ import org.eclipse.che.api.auth.shared.dto.OAuthToken;
 import org.eclipse.che.api.core.NotFoundException;
 import org.eclipse.che.api.factory.server.scm.PersonalAccessToken;
 import org.eclipse.che.api.factory.server.scm.PersonalAccessTokenManager;
+import org.eclipse.che.api.factory.server.scm.exception.ScmCommunicationException;
 import org.eclipse.che.security.oauth.shared.dto.OAuthAuthenticatorDescriptor;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
@@ -60,7 +62,7 @@ public class EmbeddedOAuthAPITest {
       expectedExceptions = NotFoundException.class,
       expectedExceptionsMessageRegExp = "Unsupported OAuth provider unknown")
   public void shouldThrowExceptionIfNoSuchProviderFound() throws Exception {
-    embeddedOAuthAPI.getToken("unknown");
+    embeddedOAuthAPI.getOrRefreshToken("unknown");
   }
 
   @Test
@@ -70,9 +72,10 @@ public class EmbeddedOAuthAPITest {
     OAuthAuthenticator authenticator = mock(OAuthAuthenticator.class);
     when(oauth2Providers.getAuthenticator(eq(provider))).thenReturn(authenticator);
 
-    when(authenticator.getToken(anyString())).thenReturn(newDto(OAuthToken.class).withToken(token));
+    when(authenticator.getOrRefreshToken(anyString()))
+        .thenReturn(newDto(OAuthToken.class).withToken(token));
 
-    OAuthToken result = embeddedOAuthAPI.getToken(provider);
+    OAuthToken result = embeddedOAuthAPI.getOrRefreshToken(provider);
 
     assertEquals(result.getToken(), token);
   }
@@ -113,6 +116,30 @@ public class EmbeddedOAuthAPITest {
     assertEquals(
         callback.getLocation().toString(),
         "http://eclipse.che?quary%3Dparam%26error_code%3Daccess_denied");
+  }
+
+  @Test
+  public void shouldAddSslErrorCode() throws Exception {
+    // given
+    UriInfo uriInfo = mock(UriInfo.class);
+    OAuthAuthenticator authenticator = mock(OAuthAuthenticator.class);
+    when(authenticator.callback(any(URL.class), anyList()))
+        .thenThrow(new ScmCommunicationException("", SSL_ERROR_CODE));
+    when(uriInfo.getRequestUri())
+        .thenReturn(
+            new URI(
+                "http://eclipse.che?state=oauth_provider"
+                    + encode(
+                        "=github&redirect_after_login=https://redirecturl.com?params=", UTF_8)));
+    when(oauth2Providers.getAuthenticator("github")).thenReturn(authenticator);
+
+    // when
+    Response callback = embeddedOAuthAPI.callback(uriInfo, singletonList("ssl_exception"));
+
+    // then
+    assertEquals(
+        callback.getLocation().toString(),
+        "https://redirecturl.com?params=&error_code=ssl_exception");
   }
 
   @Test

@@ -29,8 +29,6 @@ import org.eclipse.che.api.core.rest.MessageBodyAdapter;
 import org.eclipse.che.api.core.rest.MessageBodyAdapterInterceptor;
 import org.eclipse.che.api.deploy.jsonrpc.CheJsonRpcWebSocketConfigurationModule;
 import org.eclipse.che.api.factory.server.FactoryAcceptValidator;
-import org.eclipse.che.api.factory.server.FactoryCreateValidator;
-import org.eclipse.che.api.factory.server.FactoryEditValidator;
 import org.eclipse.che.api.factory.server.FactoryParametersResolver;
 import org.eclipse.che.api.factory.server.RawDevfileUrlFactoryParameterResolver;
 import org.eclipse.che.api.factory.server.ScmFileResolver;
@@ -48,7 +46,9 @@ import org.eclipse.che.api.factory.server.github.GithubFactoryParametersResolver
 import org.eclipse.che.api.factory.server.github.GithubScmFileResolver;
 import org.eclipse.che.api.factory.server.github.GithubScmFileResolverSecond;
 import org.eclipse.che.api.factory.server.gitlab.GitlabFactoryParametersResolver;
+import org.eclipse.che.api.factory.server.gitlab.GitlabFactoryParametersResolverSecond;
 import org.eclipse.che.api.factory.server.gitlab.GitlabScmFileResolver;
+import org.eclipse.che.api.factory.server.gitlab.GitlabScmFileResolverSecond;
 import org.eclipse.che.api.system.server.ServiceTermination;
 import org.eclipse.che.api.system.server.SystemModule;
 import org.eclipse.che.api.user.server.NotImplementedTokenValidator;
@@ -133,10 +133,6 @@ public class WsMasterModule extends AbstractModule {
     // factory
     bind(FactoryAcceptValidator.class)
         .to(org.eclipse.che.api.factory.server.impl.FactoryAcceptValidatorImpl.class);
-    bind(FactoryCreateValidator.class)
-        .to(org.eclipse.che.api.factory.server.impl.FactoryCreateValidatorImpl.class);
-    bind(FactoryEditValidator.class)
-        .to(org.eclipse.che.api.factory.server.impl.FactoryEditValidatorImpl.class);
     bind(org.eclipse.che.api.factory.server.FactoryService.class);
     bind(ScmService.class);
     install(new org.eclipse.che.api.factory.server.jpa.FactoryJpaModule());
@@ -152,6 +148,9 @@ public class WsMasterModule extends AbstractModule {
         .addBinding()
         .to(BitbucketServerAuthorizingFactoryParametersResolver.class);
     factoryParametersResolverMultibinder.addBinding().to(GitlabFactoryParametersResolver.class);
+    factoryParametersResolverMultibinder
+        .addBinding()
+        .to(GitlabFactoryParametersResolverSecond.class);
     factoryParametersResolverMultibinder.addBinding().to(BitbucketFactoryParametersResolver.class);
     factoryParametersResolverMultibinder
         .addBinding()
@@ -167,6 +166,7 @@ public class WsMasterModule extends AbstractModule {
     scmFileResolverResolverMultibinder.addBinding().to(GithubScmFileResolverSecond.class);
     scmFileResolverResolverMultibinder.addBinding().to(BitbucketScmFileResolver.class);
     scmFileResolverResolverMultibinder.addBinding().to(GitlabScmFileResolver.class);
+    scmFileResolverResolverMultibinder.addBinding().to(GitlabScmFileResolverSecond.class);
     scmFileResolverResolverMultibinder.addBinding().to(BitbucketServerScmFileResolver.class);
     scmFileResolverResolverMultibinder.addBinding().to(AzureDevOpsScmFileResolver.class);
     scmFileResolverResolverMultibinder.addBinding().to(GitSshScmFileResolver.class);

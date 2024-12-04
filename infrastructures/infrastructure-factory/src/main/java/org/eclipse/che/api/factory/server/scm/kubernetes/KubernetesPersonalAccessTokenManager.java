@@ -23,10 +23,14 @@ import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import org.eclipse.che.api.factory.server.scm.GitCredentialManager;
@@ -148,8 +152,8 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
 
   @Override
   public Optional<PersonalAccessToken> get(Subject cheUser, String scmServerUrl)
-      throws ScmConfigurationPersistenceException {
-    return doGetPersonalAccessToken(cheUser, null, scmServerUrl);
+      throws ScmConfigurationPersistenceException, ScmCommunicationException {
+    return doGetPersonalAccessTokens(cheUser, null, scmServerUrl).stream().findFirst();
   }
 
   @Override
@@ -170,24 +174,22 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
   @Override
   public Optional<PersonalAccessToken> get(
       Subject cheUser, String oAuthProviderName, @Nullable String scmServerUrl)
-      throws ScmConfigurationPersistenceException {
-    return doGetPersonalAccessToken(cheUser, oAuthProviderName, scmServerUrl);
+      throws ScmConfigurationPersistenceException, ScmCommunicationException {
+    return doGetPersonalAccessTokens(cheUser, oAuthProviderName, scmServerUrl).stream().findFirst();
   }
 
-  private Optional<PersonalAccessToken> doGetPersonalAccessToken(
+  private List<PersonalAccessToken> doGetPersonalAccessTokens(
       Subject cheUser, @Nullable String oAuthProviderName, @Nullable String scmServerUrl)
-      throws ScmConfigurationPersistenceException {
+      throws ScmConfigurationPersistenceException, ScmCommunicationException {
+    List<PersonalAccessToken> result = new ArrayList<>();
     try {
       LOG.debug(
           "Fetching personal access token for user {} and OAuth provider {}",
           cheUser.getUserId(),
           oAuthProviderName);
       for (KubernetesNamespaceMeta namespaceMeta : namespaceFactory.list()) {
-        List<Secret> secrets =
-            namespaceFactory
-                .access(null, namespaceMeta.getName())
-                .secrets()
-                .get(KUBERNETES_PERSONAL_ACCESS_TOKEN_LABEL_SELECTOR);
+        List<Secret> secrets = doGetPersonalAccessTokenSecrets(namespaceMeta);
+
         for (Secret secret : secrets) {
           LOG.debug("Checking secret {}", secret.getMetadata().getName());
           if (deleteSecretIfMisconfigured(secret)) {
@@ -219,7 +221,8 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
                       personalAccessTokenParams.getScmTokenName(),
                       personalAccessTokenParams.getScmTokenId(),
                       personalAccessTokenParams.getToken());
-              return Optional.of(personalAccessToken);
+              result.add(personalAccessToken);
+              continue;
             }
 
             // Removing token that is no longer valid. If several tokens exist the next one could
@@ -239,7 +242,30 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
       LOG.debug("Failed to get personal access token", e);
       throw new ScmConfigurationPersistenceException(e.getMessage(), e);
     }
-    return Optional.empty();
+    return result;
+  }
+
+  private List<Secret> doGetPersonalAccessTokenSecrets(KubernetesNamespaceMeta namespaceMeta)
+      throws ScmConfigurationPersistenceException {
+    try {
+      List<Secret> secrets =
+          namespaceFactory
+              .access(null, namespaceMeta.getName())
+              .secrets()
+              .get(KUBERNETES_PERSONAL_ACCESS_TOKEN_LABEL_SELECTOR);
+
+      // sort secrets to get the newest one first
+      // Assign to new list to avoid UnsupportedOperationException (ImmutableList)
+      secrets =
+          secrets.stream()
+              .sorted(Comparator.comparing(secret -> secret.getMetadata().getCreationTimestamp()))
+              .collect(Collectors.toList());
+      Collections.reverse(secrets);
+      return secrets;
+    } catch (InfrastructureException e) {
+      LOG.debug("Failed to get personal access token secret", e);
+      throw new ScmConfigurationPersistenceException(e.getMessage(), e);
+    }
   }
 
   /**
@@ -328,6 +354,39 @@ public class KubernetesPersonalAccessTokenManager implements PersonalAccessToken
     PersonalAccessToken personalAccessToken = get(scmServerUrl);
     gitCredentialManager.createOrReplace(personalAccessToken);
     return personalAccessToken;
+  }
+
+  @Override
+  public void forceRefreshPersonalAccessToken(String scmServerUrl)
+      throws ScmUnauthorizedException, ScmCommunicationException, UnknownScmProviderException,
+          UnsatisfiedScmPreconditionException, ScmConfigurationPersistenceException {
+    Subject subject = EnvironmentContext.getCurrent().getSubject();
+    PersonalAccessToken personalAccessToken =
+        scmPersonalAccessTokenFetcher.refreshPersonalAccessToken(subject, scmServerUrl);
+    gitCredentialManager.createOrReplace(personalAccessToken);
+    store(personalAccessToken);
+    removePreviousTokenSecretsIfPresent(scmServerUrl);
+  }
+
+  private void removePreviousTokenSecretsIfPresent(String scmServerUrl)
+      throws ScmConfigurationPersistenceException, UnsatisfiedScmPreconditionException {
+    try {
+      for (KubernetesNamespaceMeta namespaceMeta : namespaceFactory.list()) {
+        List<Secret> secrets = doGetPersonalAccessTokenSecrets(namespaceMeta);
+        for (int i = 1; i < secrets.size(); i++) {
+          Secret secret = secrets.get(i);
+          if (secret.getMetadata().getAnnotations().get(ANNOTATION_SCM_URL).equals(scmServerUrl)) {
+            cheServerKubernetesClientFactory
+                .create()
+                .secrets()
+                .inNamespace(getFirstNamespace())
+                .delete(secret);
+          }
+        }
+      }
+    } catch (InfrastructureException e) {
+      throw new ScmConfigurationPersistenceException(e.getMessage(), e);
+    }
   }
 
   @Override

@@ -11,7 +11,6 @@
  */
 package org.eclipse.che.api.factory.server.bitbucket;
 
-import static com.google.common.base.Strings.isNullOrEmpty;
 import static java.lang.String.format;
 import static java.lang.String.valueOf;
 
@@ -71,7 +70,20 @@ public class BitbucketServerPersonalAccessTokenFetcher implements PersonalAccess
   }
 
   @Override
+  public PersonalAccessToken refreshPersonalAccessToken(Subject cheUser, String scmServerUrl)
+      throws ScmUnauthorizedException, ScmCommunicationException {
+    // #fetchPersonalAccessToken does the same thing as #refreshPersonalAccessToken
+    return fetchOrRefreshPersonalAccessToken(cheUser, scmServerUrl);
+  }
+
+  @Override
   public PersonalAccessToken fetchPersonalAccessToken(Subject cheUser, String scmServerUrl)
+      throws ScmUnauthorizedException, ScmCommunicationException {
+    return fetchOrRefreshPersonalAccessToken(cheUser, scmServerUrl);
+  }
+
+  private PersonalAccessToken fetchOrRefreshPersonalAccessToken(
+      Subject cheUser, String scmServerUrl)
       throws ScmUnauthorizedException, ScmCommunicationException {
     if (!bitbucketServerApiClient.isConnected(scmServerUrl)) {
       LOG.debug("not a  valid url {} for current fetcher ", scmServerUrl);
@@ -146,7 +158,8 @@ public class BitbucketServerPersonalAccessTokenFetcher implements PersonalAccess
   }
 
   @Override
-  public Optional<Pair<Boolean, String>> isValid(PersonalAccessTokenParams params) {
+  public Optional<Pair<Boolean, String>> isValid(PersonalAccessTokenParams params)
+      throws ScmCommunicationException {
     if (!bitbucketServerApiClient.isConnected(params.getScmProviderUrl())) {
       // If BitBucket oAuth is not configured check the manually added user namespace token.
       HttpBitbucketServerApiClient apiClient =
@@ -166,22 +179,9 @@ public class BitbucketServerPersonalAccessTokenFetcher implements PersonalAccess
       }
     }
     try {
-      // Token is added manually by a user without token id. Validate only by requesting user info.
-      if (isNullOrEmpty(params.getScmTokenId())) {
-        BitbucketUser user = bitbucketServerApiClient.getUser(params.getToken());
-        return Optional.of(Pair.of(Boolean.TRUE, user.getName()));
-      }
-      // Token is added by OAuth. Token id is available.
-      BitbucketPersonalAccessToken bitbucketPersonalAccessToken =
-          bitbucketServerApiClient.getPersonalAccessToken(
-              params.getScmTokenId(), params.getToken());
-      return Optional.of(
-          Pair.of(
-              DEFAULT_TOKEN_SCOPE.equals(bitbucketPersonalAccessToken.getPermissions())
-                  ? Boolean.TRUE
-                  : Boolean.FALSE,
-              bitbucketPersonalAccessToken.getUser().getName()));
-    } catch (ScmItemNotFoundException | ScmUnauthorizedException | ScmCommunicationException e) {
+      BitbucketUser user = bitbucketServerApiClient.getUser(params.getToken());
+      return Optional.of(Pair.of(Boolean.TRUE, user.getName()));
+    } catch (ScmItemNotFoundException | ScmUnauthorizedException e) {
       return Optional.empty();
     }
   }

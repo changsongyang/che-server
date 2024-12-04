@@ -17,7 +17,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.stubFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
-import static java.net.HttpURLConnection.HTTP_FORBIDDEN;
+import static java.net.HttpURLConnection.HTTP_UNAUTHORIZED;
 import static org.eclipse.che.api.factory.server.github.GithubPersonalAccessTokenFetcher.DEFAULT_TOKEN_SCOPES;
 import static org.eclipse.che.api.factory.server.scm.PersonalAccessTokenFetcher.OAUTH_2_PREFIX;
 import static org.eclipse.che.dto.server.DtoFactory.newDto;
@@ -142,7 +142,7 @@ public class GithubPersonalAccessTokenFetcherTest {
   public void shouldThrowExceptionOnInsufficientTokenScopes() throws Exception {
     Subject subject = new SubjectImpl("Username", "id1", "token", false);
     OAuthToken oAuthToken = newDto(OAuthToken.class).withToken(githubOauthToken).withScope("");
-    when(oAuthAPI.getToken(anyString())).thenReturn(oAuthToken);
+    when(oAuthAPI.getOrRefreshToken(anyString())).thenReturn(oAuthToken);
 
     stubFor(
         get(urlEqualTo("/api/v3/user"))
@@ -161,7 +161,7 @@ public class GithubPersonalAccessTokenFetcherTest {
       expectedExceptionsMessageRegExp = "Username is not authorized in github OAuth provider.")
   public void shouldThrowUnauthorizedExceptionWhenUserNotLoggedIn() throws Exception {
     Subject subject = new SubjectImpl("Username", "id1", "token", false);
-    when(oAuthAPI.getToken(anyString())).thenThrow(UnauthorizedException.class);
+    when(oAuthAPI.getOrRefreshToken(anyString())).thenThrow(UnauthorizedException.class);
 
     githubPATFetcher.fetchPersonalAccessToken(subject, wireMockServer.url("/"));
   }
@@ -172,11 +172,11 @@ public class GithubPersonalAccessTokenFetcherTest {
   public void shouldThrowUnauthorizedExceptionIfTokenIsNotValid() throws Exception {
     Subject subject = new SubjectImpl("Username", "id1", "token", false);
     OAuthToken oAuthToken = newDto(OAuthToken.class).withToken(githubOauthToken).withScope("");
-    when(oAuthAPI.getToken(anyString())).thenReturn(oAuthToken);
+    when(oAuthAPI.getOrRefreshToken(anyString())).thenReturn(oAuthToken);
     stubFor(
         get(urlEqualTo("/api/v3/user"))
             .withHeader(HttpHeaders.AUTHORIZATION, equalTo("token " + githubOauthToken))
-            .willReturn(aResponse().withStatus(HTTP_FORBIDDEN)));
+            .willReturn(aResponse().withStatus(HTTP_UNAUTHORIZED)));
 
     githubPATFetcher.fetchPersonalAccessToken(subject, wireMockServer.url("/"));
   }
@@ -185,7 +185,7 @@ public class GithubPersonalAccessTokenFetcherTest {
   public void shouldReturnToken() throws Exception {
     Subject subject = new SubjectImpl("Username", "id1", "token", false);
     OAuthToken oAuthToken = newDto(OAuthToken.class).withToken(githubOauthToken);
-    when(oAuthAPI.getToken(anyString())).thenReturn(oAuthToken);
+    when(oAuthAPI.getOrRefreshToken(anyString())).thenReturn(oAuthToken);
 
     stubFor(
         get(urlEqualTo("/api/v3/user"))
@@ -254,7 +254,7 @@ public class GithubPersonalAccessTokenFetcherTest {
 
   @Test
   public void shouldNotValidateExpiredOauthToken() throws Exception {
-    stubFor(get(urlEqualTo("/api/v3/user")).willReturn(aResponse().withStatus(HTTP_FORBIDDEN)));
+    stubFor(get(urlEqualTo("/api/v3/user")).willReturn(aResponse().withStatus(HTTP_UNAUTHORIZED)));
 
     PersonalAccessTokenParams params =
         new PersonalAccessTokenParams(

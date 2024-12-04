@@ -48,9 +48,10 @@ public interface PersonalAccessTokenManager {
    * @return personal access token
    * @throws ScmConfigurationPersistenceException - problem occurred during communication with
    *     permanent storage.
+   * @throws ScmCommunicationException - problem occurred during communication with SCM server.
    */
   Optional<PersonalAccessToken> get(Subject cheUser, String scmServerUrl)
-      throws ScmConfigurationPersistenceException;
+      throws ScmConfigurationPersistenceException, ScmCommunicationException;
 
   /**
    * Gets {@link PersonalAccessToken} from permanent storage.
@@ -79,10 +80,11 @@ public interface PersonalAccessTokenManager {
    * @return personal access token
    * @throws ScmConfigurationPersistenceException - problem occurred during communication with
    *     permanent storage.
+   * @throws ScmCommunicationException - problem occurred during communication with SCM server.
    */
   Optional<PersonalAccessToken> get(
       Subject cheUser, String oAuthProviderName, @Nullable String scmServerUrl)
-      throws ScmConfigurationPersistenceException;
+      throws ScmConfigurationPersistenceException, ScmCommunicationException;
 
   /**
    * Gets {@link PersonalAccessToken} from permanent storage. If the token is not found try to fetch
@@ -94,6 +96,11 @@ public interface PersonalAccessTokenManager {
       throws ScmCommunicationException, ScmConfigurationPersistenceException,
           UnknownScmProviderException, UnsatisfiedScmPreconditionException,
           ScmUnauthorizedException;
+
+  /** Refresh a personal access token. */
+  void forceRefreshPersonalAccessToken(String scmServerUrl)
+      throws UnsatisfiedScmPreconditionException, ScmConfigurationPersistenceException,
+          ScmUnauthorizedException, ScmCommunicationException, UnknownScmProviderException;
 
   /**
    * Set or update git-credentials with {@link PersonalAccessToken} from permanent storage.

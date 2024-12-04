@@ -152,17 +152,21 @@ public class FactoryService extends Service {
           factoryParametersResolverHolder.getFactoryParametersResolver(
               singletonMap(URL_PARAMETER_NAME, url));
       if (!authorisationRequestManager.isStored(factoryParametersResolver.getProviderName())) {
-        personalAccessTokenManager.getAndStore(
-            // get the provider URL from the factory URL
-            factoryParametersResolver.parseFactoryUrl(url).getProviderUrl());
+        String scmServerUrl = factoryParametersResolver.parseFactoryUrl(url).getProviderUrl();
+        if (Boolean.parseBoolean(System.getenv("CHE_FORCE_REFRESH_PERSONAL_ACCESS_TOKEN"))) {
+          personalAccessTokenManager.forceRefreshPersonalAccessToken(scmServerUrl);
+        } else {
+          personalAccessTokenManager.getAndStore(scmServerUrl);
+        }
       }
-    } catch (ScmCommunicationException
-        | ScmConfigurationPersistenceException
-        | UnknownScmProviderException
-        | UnsatisfiedScmPreconditionException e) {
+    } catch (ScmConfigurationPersistenceException | UnsatisfiedScmPreconditionException e) {
       throw new ApiException(e);
     } catch (ScmUnauthorizedException e) {
       throw toApiException(e);
+    } catch (ScmCommunicationException e) {
+      throw toApiException(e);
+    } catch (UnknownScmProviderException e) {
+      // ignore the exception as it is not a problem if the provider from the given URL is unknown
     }
   }
 
